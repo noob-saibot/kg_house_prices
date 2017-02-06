@@ -1,4 +1,5 @@
 import pandas
+import matplotlib.pyplot as plt
 
 
 class Extractor:
@@ -10,13 +11,16 @@ class Extractor:
     def __str__(self):
         return str(self.frame)
 
-    def frame_corr(self, *data_frames):
+    def frame_corr(self, *data_frames, delta_lvl=None):
         """
         Correlation of elements of frame
         Parameters
         ----------
         :param data_frames: list
             List of frames.
+
+        :param delta_lvl: float
+            Correlation level.
 
         Returns
         -------
@@ -30,14 +34,20 @@ class Extractor:
             _all_frames_corr = []
             for index, data_frame in enumerate(data_frames):
                 if isinstance(data_frame, pandas.DataFrame):
-                    _all_frames_corr.append(data_frame.corr())
+                    if delta_lvl:
+                        _all_frames_corr.append(self._delta_corr(data_frame.corr(), delta_lvl))
+                    else:
+                        _all_frames_corr.append(data_frame.corr())
                 else:
                     print(index, "It's not a data frame", sep=' --- ')
                     _all_frames_corr.append(None)
             return _all_frames_corr
 
         elif isinstance(self.frame, pandas.DataFrame):
-            return self.frame.corr()
+            if delta_lvl:
+                return self._delta_corr(self.frame.corr(), delta_lvl)
+            else:
+                return self.frame.corr()
         else:
             return 'Frame is empty.'
 
@@ -46,11 +56,48 @@ class Extractor:
         self.frame = pandas.read_csv(self.work_dir+self.file_tr, index_col=0)
         return self.frame
 
+    @staticmethod
+    def _delta_corr(data_frame, delta):
+        """
+        Correlation of elements of frame
+        Parameters
+        ----------
+        :param data_frame: pandas.DataFrame
+            Data frame.
+
+        :param delta: list
+            Correlation level.
+
+        Returns
+        -------
+        :return data_frame: pandas.DataFrame
+            Data frame with Nan values on delta places.
+        """
+        if isinstance(data_frame, pandas.DataFrame):
+            for a in data_frame.columns:
+                data_frame.ix[abs(data_frame[a]) < delta, a] = None
+                data_frame.ix[abs(data_frame[a]) == 1.0, a] = None
+            return data_frame
+
 
 class Viewer:
-    pass
+    import matplotlib
+    matplotlib.style.use('ggplot')
+
+    def __init__(self, data_frame):
+        self.data_frame = data_frame.dropna(axis=0)
+
+    def bar(self):
+        self.data_frame.plot(kind='bar')
+        plt.show()
+
+    def line(self):
+        self.data_frame.plot()
+        plt.show()
 
 if __name__ == "__main__":
     E = Extractor(work_dir='C:/work/houses/kg_house_prices/', file_tr='data/train.csv')
     frame = E.df_creation()
-    print(E.frame_corr())
+    df = E.frame_corr(delta_lvl=0.7)[['SalePrice']]
+    print(df)
+    Viewer(df).bar()
