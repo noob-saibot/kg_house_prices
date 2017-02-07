@@ -95,9 +95,20 @@ class Viewer:
         self.data_frame.plot()
         plt.show()
 
+    def site_chart(self):
+        template = """{{labels: {labels}, datasets:
+        [{{label: "Dataset", backgroundColor: window.chartColors.red,
+        borderColor: window.chartColors.red, data: {data},
+        fill: false,}}, {{}}]}},"""
+
+        result_dict = {'labels': [x for x in self.data_frame.index.values],
+                       'data': [x[0] for x in self.data_frame.values]}
+
+        return template.format(**result_dict).replace('\'', '"')
+
 if __name__ == "__main__":
     E = Extractor(work_dir='C:/work/houses/kg_house_prices/', file_tr='data/train.csv')
     frame = E.df_creation()
-    df = E.frame_corr(delta_lvl=0.7)[['SalePrice']]
-    print(df)
+    df = E.frame_corr(delta_lvl=0.2)[['SalePrice']]
     Viewer(df).bar()
+    print(Viewer(df).site_chart())
