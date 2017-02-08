@@ -1,5 +1,7 @@
 import pandas
 import matplotlib.pyplot as plt
+from sklearn.model_selection import KFold
+from sklearn.ensemble import ExtraTreesRegressor
 
 
 class Extractor:
@@ -79,6 +81,37 @@ class Extractor:
                 data_frame.ix[abs(data_frame[a]) == 1.0, a] = None
             return data_frame
 
+    @staticmethod
+    def importance(data_frame, y_field, method=ExtraTreesRegressor, m_param=()):
+        """
+            Feature importance extraction
+            Parameters
+            ----------
+            :param data_frame: pandas.DataFrame
+                Data frame.
+
+            :param y_field: str
+                Name of column with respect to which we will extract feature importance.
+
+            :param method: Class regressor of sklearn
+                Regressor for feature extraction.
+
+            :param m_param: tuple
+                Tuple of parameters for Regressor.
+
+            Returns
+            -------
+            :return feature_importances_: numpy.array
+                Importance of features.
+
+            :return columns: pandas.indexes.base.Index
+                Names of features.
+            """
+        data_frame = pandas.get_dummies(data_frame)
+        data_frame = data_frame.fillna(data_frame.mean())
+        clf = method(*m_param).fit(data_frame.drop([y_field], axis=1), data_frame[y_field])
+        return clf.feature_importances_, data_frame.drop([y_field], axis=1).columns
+
 
 class Viewer:
     import matplotlib
@@ -106,9 +139,28 @@ class Viewer:
 
         return template.format(**result_dict).replace('\'', '"')
 
+
+class Learning:
+    def __init__(self, data_frame):
+        self.data_frame = data_frame
+
+    def __str__(self):
+        return str(self.data_frame)
+
+    def kfold(self):
+        folds = KFold(n_splits=5, shuffle=False)
+        folds = folds.split(self.data_frame.drop(['SalePrice'], axis=1), self.data_frame['SalePrice'])
+        for train_index, test_index in folds:
+            print(self.data_frame.shape)
+            print("TRAIN:", len(train_index), "TEST:", len(test_index))
+
+
 if __name__ == "__main__":
     E = Extractor(work_dir='C:/work/houses/kg_house_prices/', file_tr='data/train.csv')
     frame = E.df_creation()
     df = E.frame_corr(delta_lvl=0.2)[['SalePrice']]
-    Viewer(df).bar()
-    print(Viewer(df).site_chart())
+    imp, col = E.importance(frame, 'SalePrice')
+    frame = pandas.DataFrame(imp, dtype='float64', index=col, columns=['Importance'])
+    V = Viewer(frame.sort_values(by='Importance', ascending=False).head(20))
+    V.bar()
+    print(V.site_chart())
