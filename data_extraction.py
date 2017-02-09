@@ -1,11 +1,12 @@
 import pandas
-from numpy import sqrt
+from numpy import sqrt, log1p
 import matplotlib.pyplot as plt
 from sklearn.model_selection import KFold
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import make_scorer
+from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 
 
 class Extractor:
@@ -123,6 +124,15 @@ class Extractor:
             data_frame[column] = enc.fit_transform(data_frame[column])
         return data_frame
 
+    @staticmethod
+    def normalize_it(n_frame, n_method=log1p):
+        for col in n_frame:
+            if n_frame[col].dtype != 'object':
+                n_frame[col] = n_method(n_frame[col])
+        return n_frame
+
+
+
 
 class Viewer:
     import matplotlib
@@ -152,13 +162,13 @@ class Viewer:
 
 
 class Learning:
-    def __init__(self, data_frame, cross_params=5, y_col=-1):
+    def __init__(self, data_frame=pandas.DataFrame([1], [1]), cross_params=5, y_col=None):
         self.data_frame = data_frame
         self.cross = cross_params
-        if isinstance(y_col, int):
-            self.slice = data_frame.columns[y_col]
-        else:
+        if y_col:
             self.slice = y_col
+        else:
+            self.slice = data_frame.columns[-1]
 
     def __str__(self):
         return str(self.data_frame)
@@ -180,14 +190,14 @@ class Learning:
         reg = ExtraTreesRegressor(**m_params)
         print(frame_l[self.slice].values)
 
-        results = cross_val_score(reg, frame_l.drop([self.slice], axis=1),
+        results = sqrt(-cross_val_score(reg, frame_l.drop([self.slice], axis=1),
                                   frame_l[self.slice], cv=5, n_jobs=-1,
-                                  scoring=make_scorer(self.root_mse_score))
+                                  scoring='neg_mean_squared_error'))
         print(results.mean())
 
 
 if __name__ == "__main__":
-    E = Extractor(work_dir='C:/work/houses/kg_house_prices/', file_tr='data/train.csv')
+    E = Extractor(work_dir='./', file_tr='data/train.csv')
     frame = E.df_creation()
 
     # df = E.frame_corr(delta_lvl=0.2)[['SalePrice']]
@@ -195,7 +205,7 @@ if __name__ == "__main__":
 
     dict_of_params = {
         'n_estimators': 1000,
-        'n_jobs': 4,
+        'n_jobs': -1,
         "verbose": True,
     }
 
@@ -205,6 +215,36 @@ if __name__ == "__main__":
     # V.bar()
     # print(V.site_chart())
 
+    E.normalize_it(frame)
     frame = pandas.get_dummies(frame)
-    L = Learning(frame)
-    L.trees(dict_of_params)
+
+    # L = Learning(frame, y_col='SalePrice')
+    # L.trees(dict_of_params)
+
+    frame = frame.fillna(frame.mean())
+
+    def hyperopt_train_test(params):
+        clf = ExtraTreesRegressor(**params)
+        return cross_val_score(clf, frame.drop(['SalePrice'], axis=1),
+                               frame['SalePrice'],
+                               scoring=make_scorer(Learning().root_mse_score)).mean()
+
+
+    space4etr = {
+        'n_estimators': hp.choice('n_estimators', range(100, 1000, 20)),
+        'criterion': hp.choice('criterion', ['mse']),
+        'n_jobs': 3,
+        'max_features': hp.choice('max_features', ['auto', 'log2']),
+        'verbose': False,
+    }
+
+
+    def f(params):
+        acc = hyperopt_train_test(params)
+        print(params['criterion'], acc, params['n_estimators'], sep='\n', end='\n\n')
+        return {'loss': -acc, 'status': STATUS_OK}
+
+    trials = Trials()
+    best = fmin(f, space4etr, algo=tpe.suggest, max_evals=100, trials=trials)
+    print('best:', best)
+
