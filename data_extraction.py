@@ -1,8 +1,11 @@
 import pandas
+from numpy import sqrt
 import matplotlib.pyplot as plt
 from sklearn.model_selection import KFold
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import make_scorer
 
 
 class Extractor:
@@ -38,7 +41,7 @@ class Extractor:
             for index, data_frame in enumerate(data_frames):
                 if isinstance(data_frame, pandas.DataFrame):
                     if delta_lvl:
-                        _all_frames_corr.append(self._delta_corr(data_frame.corr(), delta_lvl))
+                        _all_frames_corr.append(self.delta_corr(data_frame.corr(), delta_lvl))
                     else:
                         _all_frames_corr.append(data_frame.corr())
                 else:
@@ -113,7 +116,7 @@ class Extractor:
         return clf.feature_importances_, data_frame.drop([y_field], axis=1).columns
 
     @staticmethod
-    def encoding(data_frame):
+    def encoding_for_labels(data_frame):
         enc = LabelEncoder()
         for column in data_frame.select_dtypes(include=['object']).columns:
             data_frame[column] = data_frame[column].factorize()[0]
@@ -149,36 +152,59 @@ class Viewer:
 
 
 class Learning:
-    def __init__(self, data_frame):
+    def __init__(self, data_frame, cross_params=5, y_col=-1):
         self.data_frame = data_frame
+        self.cross = cross_params
+        if isinstance(y_col, int):
+            self.slice = data_frame.columns[y_col]
+        else:
+            self.slice = y_col
 
     def __str__(self):
         return str(self.data_frame)
 
     def folding(self):
-        folds = KFold(n_splits=5, shuffle=False)
+        folds = KFold(n_splits=self.cross, shuffle=False)
         folds = folds.split(self.data_frame.drop(['SalePrice'], axis=1), self.data_frame['SalePrice'])
         for train_index, test_index in folds:
             print(self.data_frame.shape)
             print("TRAIN:", len(train_index), "TEST:", len(test_index))
+        return folds
+
+    @staticmethod
+    def root_mse_score(predictions, targets):
+        return sqrt(((predictions - targets) ** 2).mean())
+
+    def trees(self, m_params):
+        frame_l = self.data_frame.fillna(self.data_frame.mean())
+        reg = ExtraTreesRegressor(**m_params)
+        print(frame_l[self.slice].values)
+
+        results = cross_val_score(reg, frame_l.drop([self.slice], axis=1),
+                                  frame_l[self.slice], cv=5, n_jobs=-1,
+                                  scoring=make_scorer(self.root_mse_score))
+        print(results.mean())
 
 
 if __name__ == "__main__":
     E = Extractor(work_dir='C:/work/houses/kg_house_prices/', file_tr='data/train.csv')
     frame = E.df_creation()
-    df = E.frame_corr(delta_lvl=0.2)[['SalePrice']]
 
-    frame = E.encoding(frame)
+    # df = E.frame_corr(delta_lvl=0.2)[['SalePrice']]
+    # frame = E.encoding_for_labels(frame)
 
     dict_of_params = {
-        'n_estimators': 100,
+        'n_estimators': 1000,
         'n_jobs': 4,
+        "verbose": True,
     }
 
-    imp, col = E.importance(frame, 'SalePrice', m_param=dict_of_params)
-    frame = pandas.DataFrame(imp, dtype='float64', index=col, columns=['Importance'])
-    V = Viewer(frame.sort_values(by='Importance', ascending=False).head(10))
-    V.bar()
-    print(V.site_chart())
+    # imp, col = E.importance(frame, 'SalePrice', m_param=dict_of_params)
+    # frame = pandas.DataFrame(imp, dtype='float64', index=col, columns=['Importance'])
+    # V = Viewer(frame.sort_values(by='Importance', ascending=False).head(10))
+    # V.bar()
+    # print(V.site_chart())
 
-
+    frame = pandas.get_dummies(frame)
+    L = Learning(frame)
+    L.trees(dict_of_params)
