@@ -2,6 +2,7 @@ import pandas
 import matplotlib.pyplot as plt
 from sklearn.model_selection import KFold
 from sklearn.ensemble import ExtraTreesRegressor
+from sklearn.preprocessing import LabelEncoder
 
 
 class Extractor:
@@ -47,7 +48,7 @@ class Extractor:
 
         elif isinstance(self.frame, pandas.DataFrame):
             if delta_lvl:
-                return self._delta_corr(self.frame.corr(), delta_lvl)
+                return self.delta_corr(self.frame.corr(), delta_lvl)
             else:
                 return self.frame.corr()
         else:
@@ -59,7 +60,7 @@ class Extractor:
         return self.frame
 
     @staticmethod
-    def _delta_corr(data_frame, delta):
+    def delta_corr(data_frame, delta):
         """
         Correlation of elements of frame
         Parameters
@@ -82,7 +83,7 @@ class Extractor:
             return data_frame
 
     @staticmethod
-    def importance(data_frame, y_field, method=ExtraTreesRegressor, m_param=()):
+    def importance(data_frame, y_field, m_param, method=ExtraTreesRegressor):
         """
             Feature importance extraction
             Parameters
@@ -107,10 +108,17 @@ class Extractor:
             :return columns: pandas.indexes.base.Index
                 Names of features.
             """
-        data_frame = pandas.get_dummies(data_frame)
         data_frame = data_frame.fillna(data_frame.mean())
-        clf = method(*m_param).fit(data_frame.drop([y_field], axis=1), data_frame[y_field])
+        clf = method(**m_param).fit(data_frame.drop([y_field], axis=1), data_frame[y_field])
         return clf.feature_importances_, data_frame.drop([y_field], axis=1).columns
+
+    @staticmethod
+    def encoding(data_frame):
+        enc = LabelEncoder()
+        for column in data_frame.select_dtypes(include=['object']).columns:
+            data_frame[column] = data_frame[column].factorize()[0]
+            data_frame[column] = enc.fit_transform(data_frame[column])
+        return data_frame
 
 
 class Viewer:
@@ -147,7 +155,7 @@ class Learning:
     def __str__(self):
         return str(self.data_frame)
 
-    def kfold(self):
+    def folding(self):
         folds = KFold(n_splits=5, shuffle=False)
         folds = folds.split(self.data_frame.drop(['SalePrice'], axis=1), self.data_frame['SalePrice'])
         for train_index, test_index in folds:
@@ -159,8 +167,18 @@ if __name__ == "__main__":
     E = Extractor(work_dir='C:/work/houses/kg_house_prices/', file_tr='data/train.csv')
     frame = E.df_creation()
     df = E.frame_corr(delta_lvl=0.2)[['SalePrice']]
-    imp, col = E.importance(frame, 'SalePrice')
+
+    frame = E.encoding(frame)
+
+    dict_of_params = {
+        'n_estimators': 100,
+        'n_jobs': 4,
+    }
+
+    imp, col = E.importance(frame, 'SalePrice', m_param=dict_of_params)
     frame = pandas.DataFrame(imp, dtype='float64', index=col, columns=['Importance'])
-    V = Viewer(frame.sort_values(by='Importance', ascending=False).head(20))
+    V = Viewer(frame.sort_values(by='Importance', ascending=False).head(10))
     V.bar()
     print(V.site_chart())
+
+
