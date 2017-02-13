@@ -1,17 +1,18 @@
 import pandas
-from numpy import sqrt
+from numpy import sqrt, log1p, expm1
 import matplotlib.pyplot as plt
 from sklearn.model_selection import KFold
-from sklearn.ensemble import ExtraTreesRegressor
+from sklearn.ensemble import ExtraTreesRegressor, GradientBoostingRegressor
 from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, cross_val_predict, train_test_split
 from sklearn.metrics import make_scorer
 
 
 class Extractor:
-    def __init__(self, work_dir, file_tr):
+    def __init__(self, work_dir, file_train, file_test = None):
         self.work_dir = work_dir
-        self.file_tr = file_tr
+        self.file_tr = file_train
+        self.file_ts = file_test
         self.frame = None
 
     def __str__(self):
@@ -60,6 +61,9 @@ class Extractor:
     # Frame creation
     def df_creation(self):
         self.frame = pandas.read_csv(self.work_dir+self.file_tr, index_col=0)
+        if self.file_ts:
+            frame_test = pandas.read_csv(self.work_dir + self.file_ts, index_col=0)
+            return self.frame, frame_test
         return self.frame
 
     @staticmethod
@@ -123,6 +127,16 @@ class Extractor:
             data_frame[column] = enc.fit_transform(data_frame[column])
         return data_frame
 
+    @staticmethod
+    def normalize_it(n_frame, n_method=log1p):
+        for col in n_frame:
+            if n_frame[col].dtype != 'object':
+                n_frame[col] = n_method(n_frame[col])
+        return n_frame
+
+    def saver(self, frame_save, name):
+        frame_save.to_csv(self.work_dir+name)
+
 
 class Viewer:
     import matplotlib
@@ -152,11 +166,11 @@ class Viewer:
 
 
 class Learning:
-    def __init__(self, data_frame, cross_params=5, y_col=-1):
+    def __init__(self, data_frame, cross_params=5, y_col=''):
         self.data_frame = data_frame
         self.cross = cross_params
-        if isinstance(y_col, int):
-            self.slice = data_frame.columns[y_col]
+        if not y_col:
+            self.slice = data_frame.columns[-1]
         else:
             self.slice = y_col
 
@@ -166,37 +180,46 @@ class Learning:
     def folding(self):
         folds = KFold(n_splits=self.cross, shuffle=False)
         folds = folds.split(self.data_frame.drop(['SalePrice'], axis=1), self.data_frame['SalePrice'])
-        for train_index, test_index in folds:
-            print(self.data_frame.shape)
-            print("TRAIN:", len(train_index), "TEST:", len(test_index))
+        # for train_index, test_index in folds:
+        #     print(self.data_frame.shape)
+        #     print("TRAIN:", len(train_index), "TEST:", len(test_index))
         return folds
 
     @staticmethod
     def root_mse_score(predictions, targets):
         return sqrt(((predictions - targets) ** 2).mean())
 
-    def trees(self, m_params):
+    def trees(self, m_params, cross=True):
         frame_l = self.data_frame.fillna(self.data_frame.mean())
         reg = ExtraTreesRegressor(**m_params)
         print(frame_l[self.slice].values)
 
-        results = cross_val_score(reg, frame_l.drop([self.slice], axis=1),
-                                  frame_l[self.slice], cv=5, n_jobs=-1,
-                                  scoring=make_scorer(self.root_mse_score))
-        print(results.mean())
+        if cross:
+            results = cross_val_score(reg, frame_l.drop([self.slice], axis=1),
+                                      frame_l[self.slice], cv=5, n_jobs=-1,
+                                      scoring=make_scorer(self.root_mse_score))
+            results.mean()
+        else:
+            reg.fit(frame_l.drop([self.slice], axis=1), frame_l[self.slice])
+            return reg
 
 
 if __name__ == "__main__":
-    E = Extractor(work_dir='C:/work/houses/kg_house_prices/', file_tr='data/train.csv')
-    frame = E.df_creation()
+    E = Extractor(work_dir='./',
+                  file_train='data/train.csv',
+                  file_test='data/test.csv')
+    frame, frame2 = E.df_creation()
+
+    result_frame = pandas.concat([frame, frame2], axis=0)
 
     # df = E.frame_corr(delta_lvl=0.2)[['SalePrice']]
     # frame = E.encoding_for_labels(frame)
 
     dict_of_params = {
-        'n_estimators': 1000,
-        'n_jobs': 4,
+        'n_estimators': 300,
+        #'n_jobs': 4,
         "verbose": True,
+        "criterion": 'mse'
     }
 
     # imp, col = E.importance(frame, 'SalePrice', m_param=dict_of_params)
@@ -205,6 +228,31 @@ if __name__ == "__main__":
     # V.bar()
     # print(V.site_chart())
 
-    frame = pandas.get_dummies(frame)
-    L = Learning(frame)
-    L.trees(dict_of_params)
+    result_frame = pandas.get_dummies(result_frame)
+    result_frame = E.normalize_it(result_frame)
+    frame_train = result_frame.dropna(subset=['SalePrice'])
+    frame_test = result_frame[result_frame['SalePrice'].isnull()]
+
+    frame_train = frame_train.fillna(frame_train.mean())
+    X_train, X_test, y_train, y_test = train_test_split(frame_train.drop(['SalePrice'], axis=1),
+                                                        frame_train['SalePrice'],
+                                                        train_size=0.7)
+    model = ExtraTreesRegressor(**dict_of_params)
+    model = GradientBoostingRegressor(**dict_of_params)
+
+
+    model.fit(X_train, y_train)
+
+    print(Learning.root_mse_score(model.predict(X_test), y_test))
+
+    submission = frame_test['SalePrice']
+    frame_test = frame_test.drop(['SalePrice'], axis=1)
+    frame_test = frame_test.fillna(frame_test.mean())
+    rs = expm1(model.predict(frame_test))
+
+    submission = pandas.DataFrame(data=rs, index=submission.index, columns=['SalePrice'])
+    E.saver(submission, 'sub.csv')
+
+
+
+
